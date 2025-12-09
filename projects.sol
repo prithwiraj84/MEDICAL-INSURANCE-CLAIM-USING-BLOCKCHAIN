@@ -52,3 +52,5 @@ contract NFTArtMarketplace {
         emit NFTSold(_id, msg.sender, msg.value);
     }
 }
+
+
