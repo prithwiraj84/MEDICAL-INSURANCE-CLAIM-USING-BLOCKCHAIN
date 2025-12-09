@@ -1,56 +1,124 @@
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-contract NFTArtMarketplace {
-    struct NFT {
+/**
+ * @title Medical Insurance System
+ * @dev A smart contract to manage medical insurance claims transparently.
+ */
+contract MedicalInsurance {
+
+    // --- Roles ---
+    address public insurer; // The admin/insurance company
+
+    // --- State Variables ---
+    struct Claim {
         uint256 id;
-        address creator;
-        address owner;
-        string metadata;
-        uint256 price;
-        bool forSale;
+        address patient;
+        address doctor;
+        string diagnosis;     // Encrypted hash or description
+        uint256 amount;       // Amount claimed in Wei
+        uint256 timestamp;
+        ClaimStatus status;
+        string rejectionReason; // Optional
     }
 
-    uint256 public nftCount;
-    mapping(uint256 => NFT) public nfts;
-    mapping(address => uint256[]) public userNFTs;
+    enum ClaimStatus { Pending, Approved, Rejected }
 
-    event NFTCreated(uint256 id, address creator, string metadata, uint256 price);
-    event NFTSold(uint256 id, address buyer, uint256 price);
-    event NFTListed(uint256 id, uint256 price);
-    event NFTUnlisted(uint256 id);
+    // Storage
+    mapping(uint256 => Claim) public claims;
+    mapping(address => bool) public authorizedDoctors;
+    uint256 public claimCount;
 
-    function createNFT(string memory _metadata, uint256 _price) public {
-        nftCount++;
-        nfts[nftCount] = NFT(nftCount, msg.sender, msg.sender, _metadata, _price, false);
-        userNFTs[msg.sender].push(nftCount);
-        emit NFTCreated(nftCount, msg.sender, _metadata, _price);
+    // --- Events ---
+    // Emitted when a doctor submits a new claim
+    event ClaimSubmitted(uint256 indexed claimId, address indexed patient, address indexed doctor, uint256 amount);
+    // Emitted when the insurer processes a claim
+    event ClaimProcessed(uint256 indexed claimId, ClaimStatus status, string reason);
+    // Emitted when a doctor is authorized
+    event DoctorAuthorized(address doctor);
+
+    // --- Modifiers ---
+    modifier onlyInsurer() {
+        require(msg.sender == insurer, "Only the Insurer can perform this action");
+        _;
     }
 
-    function listNFT(uint256 _id, uint256 _price) public {
-        require(nfts[_id].owner == msg.sender, "Not the owner");
-        nfts[_id].price = _price;
-        nfts[_id].forSale = true;
-        emit NFTListed(_id, _price);
+    modifier onlyAuthorizedDoctor() {
+        require(authorizedDoctors[msg.sender], "Only authorized doctors can submit claims");
+        _;
     }
 
-    function unlistNFT(uint256 _id) public {
-        require(nfts[_id].owner == msg.sender, "Not the owner");
-        nfts[_id].forSale = false;
-        emit NFTUnlisted(_id);
+    // --- Constructor ---
+    constructor() {
+        insurer = msg.sender; // The deployer is the insurance company
     }
 
-    function buyNFT(uint256 _id) public payable {
-        require(nfts[_id].forSale, "NFT not for sale");
-        require(msg.value >= nfts[_id].price, "Insufficient funds");
+    // --- Functions ---
 
-        address previousOwner = nfts[_id].owner;
-        payable(previousOwner).transfer(msg.value);
+    /**
+     * @dev 1. Authorize a doctor/hospital to submit claims.
+     * @param _doctor Address of the doctor/hospital wallet.
+     */
+    function authorizeDoctor(address _doctor) external onlyInsurer {
+        authorizedDoctors[_doctor] = true;
+        emit DoctorAuthorized(_doctor);
+    }
 
-        nfts[_id].owner = msg.sender;
-        nfts[_id].forSale = false;
+    /**
+     * @dev 2. Submit a new claim (Called by Doctor/Hospital).
+     * @param _patient Address of the patient.
+     * @param _diagnosis Diagnosis details or IPFS hash of the report.
+     * @param _amount Cost of treatment (in Wei).
+     */
+    function submitClaim(address _patient, string memory _diagnosis, uint256 _amount) external onlyAuthorizedDoctor {
+        claimCount++;
+        
+        claims[claimCount] = Claim({
+            id: claimCount,
+            patient: _patient,
+            doctor: msg.sender,
+            diagnosis: _diagnosis,
+            amount: _amount,
+            timestamp: block.timestamp,
+            status: ClaimStatus.Pending,
+            rejectionReason: ""
+        });
 
-        emit NFTSold(_id, msg.sender, msg.value);
+        emit ClaimSubmitted(claimCount, _patient, msg.sender, _amount);
+    }
+
+    /**
+     * @dev 3. Approve a claim (Called by Insurer).
+     * In a real system, this might trigger a stablecoin transfer.
+     */
+    function approveClaim(uint256 _claimId) external onlyInsurer {
+        require(claims[_claimId].id != 0, "Claim does not exist");
+        require(claims[_claimId].status == ClaimStatus.Pending, "Claim is not pending");
+
+        claims[_claimId].status = ClaimStatus.Approved;
+        
+        emit ClaimProcessed(_claimId, ClaimStatus.Approved, "Approved");
+    }
+
+    /**
+     * @dev 4. Reject a claim with a reason (Called by Insurer).
+     */
+    function rejectClaim(uint256 _claimId, string memory _reason) external onlyInsurer {
+        require(claims[_claimId].id != 0, "Claim does not exist");
+        require(claims[_claimId].status == ClaimStatus.Pending, "Claim is not pending");
+
+        claims[_claimId].status = ClaimStatus.Rejected;
+        claims[_claimId].rejectionReason = _reason;
+
+        emit ClaimProcessed(_claimId, ClaimStatus.Rejected, _reason);
+    }
+
+    // --- View Functions (For Frontend) ---
+
+    /**
+     * @dev Get details of a specific claim.
+     */
+    function getClaimDetails(uint256 _claimId) external view returns (Claim memory) {
+        return claims[_claimId];
     }
 }
-
-
